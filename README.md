@@ -12,7 +12,7 @@ browser.goto "https://google.com/"
 ```
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/google.com.png)
 ```ruby
-File.write "1.htm", browser.at_css("body").recognize.visualize
+File.write "1.htm", browser.at_css("body").recognize.dump
 ```
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/google.com.recognized.jpg)  
 ```ruby
@@ -20,8 +20,10 @@ browser.at_css("input[type=text]").focus.type "Ruby", :enter
 ```
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.jpg)
 ```ruby
-sleep 2
-
-File.write "2.htm", browser.at_css("body").recognize.visualize
+File.write "2.htm", browser.at_css("body").recognize.dump
 ```
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.recognized.jpg)
+```ruby
+browser.at_css("body").rows
+```
+![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.rows.png)

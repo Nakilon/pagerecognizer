@@ -8,8 +8,9 @@ Gem::Specification.new do |spec|
   spec.license      = "MIT"
   spec.metadata     = {"source_code_uri" => "https://github.com/nakilon/pagerecognizer"}
 
+  spec.add_dependency "nokogiri"
+  spec.add_dependency "ferrum"
   spec.add_development_dependency "minitest"
-  spec.add_development_dependency "ferrum"
   spec.add_development_dependency "ruby-prof"
   spec.add_development_dependency "byebug"
 
