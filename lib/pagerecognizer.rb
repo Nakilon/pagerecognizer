@@ -7,6 +7,11 @@ end if defined? Ferrum::Frame::Runtime
 
 module PageRecognizer
 
+  class << self
+    attr_accessor :logger
+  end
+  self.logger = Logger.new STDOUT
+
   module Dumpable
     def dump
       "<html><body>#{
@@ -31,9 +36,10 @@ module PageRecognizer
     end.extend Dumpable
   end
 
-  def recognize logger = nil
-    nodes = []
+  def recognize
+    logger = Module.nesting.first.logger
 
+    nodes = []
     try = lambda do
       prev = nodes
       code = "( function(node) {
@@ -75,10 +81,10 @@ module PageRecognizer
       t = Time.now
       until try.call
         fail "number of DOM elements didn't stop to change" if Time.now > t + 5
-        logger.info "#{nodes.size} DOM nodes found" if logger
+        logger.info "#{nodes.size} DOM nodes found"
       end
     end
-    logger.info "#{nodes.size} DOM nodes found" if logger
+    logger.info "#{nodes.size} DOM nodes found"
 
     nodes.select! &:clickable
     nodes.reject do |n|
@@ -94,9 +100,10 @@ module PageRecognizer
     end.extend Dumpable
   end
 
-  private def recognize_more logger = nil
-    nodes = []
+  private def recognize_more
+    logger = Module.nesting.first.logger
 
+    nodes = []
     try = lambda do
       prev = nodes
       code = "( function(node) {
@@ -126,45 +133,49 @@ module PageRecognizer
       t = Time.now
       until try.call
         fail "number of DOM elements didn't stop to change" if Time.now > t + 10
-        logger.info "#{nodes.size} DOM nodes found" if logger
+        logger.info "#{nodes.size} DOM nodes found"
       end
     end
-    logger.info "#{nodes.size} DOM nodes found" if logger
+    logger.info "#{nodes.size} DOM nodes found"
 
     nodes.reject!{ |i| i.height.zero? || i.width.zero? }
     nodes
   end
 
-  private def split hh, ww, tt, logger = nil
-    logger ||= Object.new.tap do |stub|
-      stub.define_singleton_method(:info){|*|}
-      stub.define_singleton_method(:debug){|*|}
-    end
+  private def split hh, ww, tt
+    logger = Module.nesting.first.logger
 
     nodes = nil
-    try = lambda do
-      nodes = recognize_more
-      logger.info "nodes: #{nodes.size}"
-      nodes.reject!{ |i| %w{ button script svg path a img span }.include? i.node.tag_name }
-    end
-    unless defined? Selenium::WebDriver::Error::StaleElementReferenceError
-      try.call
+    unstale = unless defined? Selenium::WebDriver::Error::StaleElementReferenceError
+      ->(&b){ b.call }
     else
-      t = Time.now
-      begin
-        try.call
-      rescue Selenium::WebDriver::Error::StaleElementReferenceError
-        raise if Time.now > t + 10
-        retry
+      lambda do |&try|
+        t = Time.now
+        begin
+          try.call
+        rescue Selenium::WebDriver::Error::StaleElementReferenceError
+          raise if Time.now > t + 10
+          retry
+        end
       end
     end
-    logger.debug "good nodes: #{nodes.size}"
+    unstale.call do nodes = recognize_more end
+    logger.info "nodes: #{nodes.size}"
+    rect = page.evaluate("( function(node) { return JSON.parse(JSON.stringify(node.getBoundingClientRect())) } )(arguments[0])", self)
+    nodes.reject!{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
+    logger.info "nodes within: #{nodes.size}"
+    if nodes.empty?
+      logger.info "no solutions found"
+      return
+    end
+    unstale.call do nodes.reject!{ |i| %w{ button script svg path a img span }.include? i.node.tag_name } end
+    logger.info "good nodes: #{nodes.size}"
 
     # euristic:
     # when we split vertically   we exclude nodes with width  is much smaller than maximal
     # when we split horizontally we exclude nodes with height is much smaller than maximal
-    nodes.select!{ |i| i[ww] > nodes.map(&ww).max / 3 }
-    logger.debug "large enough: #{nodes.size}"
+    nodes.select!{ |i| i[ww] > nodes.map(&ww).max / 2 }
+    logger.info "large enough: #{nodes.size}"
 
     # when we split vertically it detects if nodes have common horizontal lines
     # when we split horizontally it detects if nodes have common vertical lines
@@ -173,13 +184,13 @@ module PageRecognizer
       d < b[hh] && b[tt] < a[tt] + a[hh]
     end
 
-    # indexes of nodes that are within another node having the same set of interfering nodes
+    # indexes of nodes that are within another node by axis and having the same set of interfering nodes
     nested = nodes.each_with_index.to_a.combination(2).map do |(a, i), (b, j)|
-      i if a[ww] <= b[ww] && a[tt] >= b[tt] && a[tt] + a[hh] <= b[tt] + b[hh] &&  # a is inside b
+      i if a[ww] <= b[ww] && a[tt] >= b[tt] && a[tt] + a[hh] <= b[tt] + b[hh] &&  # a is kind of inside b
            nodes.map.with_index{ |e, i| i if interfere[a, e] } ==
            nodes.map.with_index{ |e, i| i if interfere[b, e] }
     end.compact.uniq
-    logger.debug "nested: #{nested.size}"
+    logger.info "nested: #{nested.size}"
 
     # adding the :area field for faster upcoming computations
     struct = Struct.new *nodes.first.members, :area
@@ -197,12 +208,10 @@ module PageRecognizer
       memo[aa][bb] = interfere.call rest[aa], rest[bb]
     end
 
+    rest = rest.sort_by(&:area).reverse
+
     max = 0
-    prev = Time.now - 2
-    ff = lambda do |acc = [], drop = 0, is = [], area_acc = 0|
-      # if Time.now > prev + 1
-        prev = Time.now
-      # end
+    ff = lambda do |acc, drop, is, area_acc|
       b = nil
       stop = false
       t = rest.drop(drop).flat_map.with_index do |e, i|
@@ -223,7 +232,7 @@ module PageRecognizer
     # require "ruby-prof"
     # RubyProf.start
     time = Time.now
-    solutions = ff.call
+    solutions = ff.call [], 0, [], 0
     logger.info "#{Time.now - time} sec"
     logger.info "#{solutions.size} solutions"
     # result = RubyProf.stop
@@ -237,11 +246,12 @@ module PageRecognizer
     # fail "the next line may fail on the calling the `#last` method" if rest == 1
     best = grouped.each{ |size, group| logger.debug [size, group.map(&:last).take(10)] }.
                    each{ |k,g| g.reject!{ |(solution, area)| fr.any?{ |sol, ar| ar >= area && sol.size > solution.size } } }.
-                   reject{ |size, group| group.empty? }.
-                   each{ |size, group| logger.info [size, group.map(&:last).take(10)].inspect }.
-                   first.last.map(&:first)
-
-    best.first.extend Dumpable
+                   reject{ |size, group| group.empty? }
+    if best.empty?
+      logger.info "no solutions found"
+      return
+    end
+    best.each{ |size, group| logger.info [size, group.map(&:last).take(10)].inspect }.first.last.map(&:first).first.sort_by(&tt).extend Dumpable
   end
 
   def rows
