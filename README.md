@@ -22,7 +22,7 @@ Ok, let's try something more complex:
 ```ruby
 browser.at_css("input[type=text]").focus.type "Ruby", :enter
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.recognized.jpg)  
+![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.recognized_.jpg)  
 Or find the main vertical sections (`#rows`) that the page consists of:
 ```ruby
 browser.at_css("body").rows
@@ -30,7 +30,7 @@ browser.at_css("body").rows
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.rows.png)  
 Now if we do the same thing to the largest block we've just found:  
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.main.jpg)  
-You may already have a guess how to find which of these are real text results.  
+You may already have a guess how to find which of these are text results.  
 The rest is simple. Full example script is included in this repo:
 ```none
 $ bundle install && bundle exec ruby google.example.rb
