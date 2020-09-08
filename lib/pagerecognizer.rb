@@ -6,7 +6,6 @@ end if defined? Ferrum::Frame::Runtime
 
 
 module PageRecognizer
-
   class << self
     attr_accessor :logger
   end
