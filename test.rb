@@ -6,7 +6,7 @@ Ferrum::Node.include PageRecognizer
 
 describe PageRecognizer do
   it "google" do
-    browser = Ferrum::Browser.new **(ENV.has_key?("CI") ? {browser_options: {"no-sandbox": nil}} : {})
+    browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
     browser.execute "document.write(#{File.read("google.htm").inspect})"
     results = browser.at_css("body").rows.max_by(&:area).node.rows
