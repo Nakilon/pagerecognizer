@@ -1,3 +1,6 @@
+[![Gem Version](https://badge.fury.io/rb/pagerecognizer.svg)](http://badge.fury.io/rb/pagerecognizer)
+![Test](https://github.com/nakilon/pagerecognizer/workflows/.github/workflows/test.yaml/badge.svg)
+
 The idea is to forget that DOM is a tree and view the page as a human. Then apply smart algorithms to recognize the main blocks that really form a UI.
 This is particularly useful in test automation because HTML/CSS internals are changing more frequently than design.
 
