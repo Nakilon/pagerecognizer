@@ -19,5 +19,5 @@ Gem::Specification.new do |spec|
 
   spec.require_path = "lib"
   spec.test_file    = "test.rb"
-  spec.files        = %w{ LICENSE.txt pagerecognizer.gemspec lib/pagerecognizer.rb }
+  spec.files        = %w{ LICENSE pagerecognizer.gemspec lib/pagerecognizer.rb }
 end
