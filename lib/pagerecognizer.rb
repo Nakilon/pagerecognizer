@@ -235,7 +235,6 @@ module PageRecognizer
     split heuristics, :width, :height, :left, :top
   end
 
-  end
 
 end
 
