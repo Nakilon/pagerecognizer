@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name         = "pagerecognizer"
-  spec.version      = "0.0.0"
+  spec.version      = "0.0.1"
   spec.summary      = "visual HTML page structure recognizer"
 
   spec.author       = "Victor Maslov aka Nakilon"
@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.metadata     = {"source_code_uri" => "https://github.com/nakilon/pagerecognizer"}
 
   spec.add_dependency "nokogiri"
-
+  spec.add_dependency "pcbr"
   spec.add_dependency "ferrum"
   spec.add_development_dependency "minitest"
 

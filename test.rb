@@ -1,7 +1,6 @@
 require "minitest/autorun"
 require "ferrum"
 require_relative "lib/pagerecognizer"
-PageRecognizer.logger.level = Logger::WARN
 Ferrum::Node.include PageRecognizer
 
 describe PageRecognizer do
@@ -9,7 +8,7 @@ describe PageRecognizer do
     browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
     browser.execute "document.write(#{File.read("google.htm").inspect})"
-    results = browser.at_css("body").rows.max_by(&:area).node.rows
+    results = browser.at_css("body").rows
     width = results.group_by(&:width).max_by{ |w, g| g.size }.first
     assert_equal [
       ["https://www.ruby-lang.org/ru/", "Ruby это... динамический язык программирования с о"],
@@ -21,7 +20,7 @@ describe PageRecognizer do
       ["https://vc.ru/dev/72391-pochemu-my-vybiraem-ruby-d", "20 июн. 2019 г. - Ruby on Rails одним из первых на"],
       ["https://tproger.ru/tag/ruby/", "Django или Ruby on Rails: какой фреймворк выбрать?"],
       ["https://rubyrussia.club/", "Главная российская конференция о Ruby. Расширяем г"]
-    ], results.select{ |r| r.width == width }.map(&:node).map(&:rows).compact.map{ |link, desc| [
+    ], results.select{ |r| r.width == width }.map(&:node).map(&:rows).map{ |link, desc| [
       link.node.at_css("a").property("href")[0,50],
       desc.node.text[0,50],
     ] }
