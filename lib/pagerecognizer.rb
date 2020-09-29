@@ -224,7 +224,7 @@ module PageRecognizer
     unless best = pcbr.table.reject{ |is,| is.size < 2 }.max_by(&:last)
       raise ErrorNotEnoughNodes.new "failed to split <#{tag_name}>", all: all, inside: inside, nodes: nodes, large: large, rest: rest
     end
-    rest.values_at(*best.first).extend(Dumpable)
+    rest.values_at(*best.first).extend Dumpable
   end
 
   def rows *heuristics
@@ -249,6 +249,15 @@ module PageRecognizer
       end
     end
     result.map{ |_| _.map &:last }
+  end
+
+  module Gridable
+    def rows
+      Module.nesting[1].piles(map{ |n| [n.top, n.height] }).map{ |s| values_at(*s).extend Module.nesting[1]::Dumpable }
+    end
+    def cols
+      Module.nesting[1].piles(map{ |n| [n.left, n.width] }).map{ |s| values_at(*s).extend Module.nesting[1]::Dumpable }
+    end
   end
 
   def grid
@@ -338,8 +347,8 @@ module PageRecognizer
         pcbr.store sorted, [
           *( sol.map(&:area).inject(:+) if heuristics.include? :AREA ),
           xn.size * yn.size,
-          xn.map{ |g| sosol = rest.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.left, s1.width, s2.left, s2.width] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / xn.size,
-          yn.map{ |g| sosol = rest.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.top, s1.height, s2.top, s2.height] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / yn.size,
+          xn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.left, s1.width, s2.left, s2.width] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / xn.size,
+          yn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.top, s1.height, s2.top, s2.height] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / yn.size,
         ]
         if prev && Time.now - time > 1 && (Time.now - prev > (prev - time) * 2 || Time.now - prev > 3)
           m = pcbr.table.reject{ |i| i.first.size < 3 }.map(&:last).max
@@ -356,7 +365,7 @@ module PageRecognizer
     end
     lp.call []
     # TODO: if multiple with max score, take the max by area
-    rest.values_at(*pcbr.table.max_by(&:last).first).extend(Dumpable)
+    rest.values_at(*pcbr.table.max_by(&:last).first).extend Dumpable, Gridable
   end
 
 end

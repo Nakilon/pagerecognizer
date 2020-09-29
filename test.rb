@@ -3,7 +3,7 @@ require "ferrum"
 require_relative "lib/pagerecognizer"
 
 describe PageRecognizer do
-  it "google split" do
+  it "google rows" do
     browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
     browser.execute "document.write(#{File.read("google.htm").inspect})"
@@ -25,13 +25,16 @@ describe PageRecognizer do
     ] }
     browser.quit
   end
-  it "youtube grid" do
+  it "youtube cols grid" do
     browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
     browser.execute "document.write(#{File.read("youtube.htm").inspect})"
+    assert_equal %w{ Главная В\ тренде Подписки Библиотека История }, browser.at_css("ytd-mini-guide-renderer").rows.map(&:node).map(&:text).map(&:strip)
     results = browser.at_css("#content").grid
     assert_equal 24, results.size
     assert results.flat_map{ |n| n.to_h.values_at :width, :height }.all?{ |_| (_-275).abs < 25 }
+    assert_equal [3]*8, results.rows.map(&:size)
+    assert_equal [8]*3, results.cols.map(&:size)
     browser.quit
   end
 end

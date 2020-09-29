@@ -53,7 +53,13 @@ Yay! We have just scraped Google Search results page knowing only that it has `<
 
 ```ruby
 browser.goto "https://youtube.com/"
-File.write "temp.htm", browser.at_css("#content").grid.dump
+grid = browser.at_css("#content").grid
+
+grid.size              # => 24
+grid.cols.size         # => 3
+grid.cols.map(&:size)  # => [8, 8, 8]
+grid.rows.size         # => 8
+grid.rows.map(&:size)  # => [3, 3, 3, 3, 3, 3, 3, 3]
 ```
 ![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/youtube.grid.png)  
 
