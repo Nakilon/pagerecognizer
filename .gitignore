@@ -1,3 +1,4 @@
-/.byebug_history
 /Gemfile.lock
+/pkg
+/.byebug_history
 /temp*

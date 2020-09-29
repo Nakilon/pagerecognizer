@@ -28,7 +28,7 @@ describe PageRecognizer do
   it "youtube grid" do
     browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
-    browser.execute "document.write(#{File.read("youtube3.htm").inspect})"
+    browser.execute "document.write(#{File.read("youtube.htm").inspect})"
     results = browser.at_css("#content").grid
     assert_equal 24, results.size
     assert results.flat_map{ |n| n.to_h.values_at :width, :height }.all?{ |_| (_-275).abs < 25 }
