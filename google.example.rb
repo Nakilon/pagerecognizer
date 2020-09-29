@@ -1,7 +1,6 @@
-require "ferrum"                            # currently only Ferrum is supported but it should be trivial to add Selenium
-require_relative "lib/pagerecognizer"       # or `require "pagerecognizer"` if you are using it as a gem
-Ferrum::Node.include PageRecognizer         # here we add Ferrum nodes the magic methods
-PageRecognizer.logger.level = Logger::WARN  # loglevel is DEBUG by default
+require "ferrum"                              # currently only Ferrum is supported but it should be trivial to add Selenium
+require_relative "lib/pagerecognizer"         # or `require "pagerecognizer"` if you are using it as a gem
+Ferrum::Node.include PageRecognizer           # here we add Ferrum nodes the magic methods
 
 browser = Ferrum::Browser.new headless: false
 browser.goto "https://google.com/"

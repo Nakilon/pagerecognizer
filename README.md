@@ -4,7 +4,7 @@
 The idea is to forget that DOM is a tree and view the page as a human. Then apply smart algorithms to recognize the main blocks that really form a UI.
 This is particularly useful in test automation because HTML/CSS internals are changing more frequently than design.
 
-### Examples:
+### Example of splitting in cols and rows ([google.example.rb](google.example.rb) is much more updated than this readme):
 
 Let's open a website:
 ```ruby
@@ -48,3 +48,12 @@ $ bundle install && bundle exec ruby google.example.rb
   https://tproger.ru/tag/ruby/                                            Django или Ruby on Rails: какой фреймворк...        
 ```
 Yay! We have just scraped Google Search results page knowing only that it has `<body>` and `<a>` tags and nothing else about attributes or DOM structure.
+
+### Example of grid detection
+
+```ruby
+browser.goto "https://youtube.com/"
+File.write "temp.htm", browser.at_css("#content").grid.dump
+```
+![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/youtube.grid.png)  
+

@@ -1,10 +1,9 @@
 require "minitest/autorun"
 require "ferrum"
 require_relative "lib/pagerecognizer"
-Ferrum::Node.include PageRecognizer
 
 describe PageRecognizer do
-  it "google" do
+  it "google split" do
     browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
     browser.goto "about:blank"
     browser.execute "document.write(#{File.read("google.htm").inspect})"
@@ -24,5 +23,15 @@ describe PageRecognizer do
       link.node.at_css("a").property("href")[0,50],
       desc.node.text[0,50],
     ] }
+    browser.quit
+  end
+  it "youtube grid" do
+    browser = Ferrum::Browser.new **(ENV.has_key?("FERRUM_NO_SANDBOX") ? {browser_options: {"no-sandbox": nil}} : {})
+    browser.goto "about:blank"
+    browser.execute "document.write(#{File.read("youtube3.htm").inspect})"
+    results = browser.at_css("#content").grid
+    assert_equal 24, results.size
+    assert results.flat_map{ |n| n.to_h.values_at :width, :height }.all?{ |_| (_-275).abs < 25 }
+    browser.quit
   end
 end
