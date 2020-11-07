@@ -297,8 +297,9 @@ module PageRecognizer
       end
     end
     logger.info "not nested: #{rest.size}"
-    3.times do  # TODO: until it stops shrinking
-      rest = rest.select.with_index do |a, i|
+    begin
+      prev = rest.size
+      rest.select!.with_index do |a, i|
         rest.each_with_index.any? do |b, j|
           cw = [[a.left + a.width, b.left + b.width].min - [a.left, b.left].max, 0].max
           i != j && !interfere[a, b] && [cw, a.width].min.fdiv(a.width) * [cw, b.width].min.fdiv(b.width) > 0.9
@@ -308,17 +309,7 @@ module PageRecognizer
           i != j && !interfere[a, b] && [ch, a.height].min.fdiv(a.height) * [ch, b.height].min.fdiv(b.height) > 0.9
         end
       end
-      rest = rest.select.with_index do |a, i|
-        rest.each_with_index.any? do |b, j|
-          cw = [[a.left + a.width, b.left + b.width].min - [a.left, b.left].max, 0].max
-          i != j && !interfere[a, b] && [cw, a.width].min.fdiv(a.width) * [cw, b.width].min.fdiv(b.width) > 0.9
-        end and
-        rest.each_with_index.any? do |b, j|
-          ch = [[a.top + a.height, b.top + b.height].min - [a.top, b.top].max, 0].max
-          i != j && !interfere[a, b] && [ch, a.height].min.fdiv(a.height) * [ch, b.height].min.fdiv(b.height) > 0.9
-        end
-      end
-    end
+    end until prev == rest.size
     logger.info "gridable: #{rest.size}"
 
     require "pcbr"
