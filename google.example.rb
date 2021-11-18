@@ -7,14 +7,19 @@ browser.goto "https://google.com/"
 browser.at_css("input[type=text]").focus.type "Ruby", :enter
 sleep 2   # https://github.com/rubycdp/ferrum/issues/114
 
-results = browser.at_css("body").rows       # Array of Structs that have a `.node` attribute (`Ferrum::Node`)
+# by default the `PageRecognizer#rows` method looks for blocks that are similar in size
+# so if we want to split into blocks that ...
+results = browser.at_css("body").rows [:TEXT]       # Array of Structs that have a `.node` attribute (`Ferrum::Node`)
 File.write "temp1.htm", results.dump
 # this .htm file is a dump -- that colored thing from docs
 # (there is also a method `PageRecognizer.load` to load a dump for later observation)
 # now if we observe the dump we'll see that we need those 9 blocks with the same width
-width = results.group_by(&:width).max_by{ |_, g| g.size }.first
-splitted = results.select{ |r| r.width == width }.map(&:node).map{ |i| i.rows :SIZE, :AREA, :MIDDLE }
+width, group = results.group_by(&:width).max_by{ |_, g| g.size }
 
+puts "#{group.size} search results"
+group.map(&:node).each{ |_| browser.execute "arguments[0].style['background-color'] = 'yellow'", _}
+
+splitted = group.map(&:node).map{ |i| i.rows([], :SIZE, :AREA, :MIDDLE) }
 # if you want to see how every result was splitted, join them and dump like this
 File.write "temp2.htm", splitted.flatten(1).extend(PageRecognizer::Dumpable).dump
 

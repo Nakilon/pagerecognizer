@@ -4,6 +4,7 @@ module PageRecognizer
   end
   require "logger"
   self.logger = Logger.new STDOUT
+  self.logger.level = ENV.fetch("LOGLEVEL_PageRecognizer", "FATAL").to_sym
 
   module Dumpable
     def dump
@@ -160,34 +161,56 @@ module PageRecognizer
       end
     end
     all = unstale.call do recognize_more end.sort_by(&tt)
-    logger.info "all nodes: #{all.size}"
-    rect = page.evaluate("( function(node) { return JSON.parse(JSON.stringify(node.getBoundingClientRect())) } )(arguments[0])", self)
+    logger.info "all page nodes: #{all.size}"
+    rect = page.evaluate "JSON.parse(JSON.stringify(arguments[0].getBoundingClientRect()))", self
     inside = all.reject{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
     raise ErrorNotEnoughNodes.new "no inside nodes", all: all, inside: inside if inside.empty?
-    logger.info "inside nodes: #{inside.size}"
+    logger.info "nodes within: #{inside.size}"
     nodes = unstale.call do inside.reject{ |i| %w{ button script svg path a img span }.include? i.node.tag_name } end.uniq{ |i| [i[hh], i[ww], i[tt], i[ll]] }
     logger.info "good and unique: #{nodes.size}"   # only those that might be containers
 
-    large = nodes#.select{ |i| i[ww] > nodes.map(&ww).max / 4 }
-    logger.info "large enough: #{large.size}"
+    if heuristics.include? :TEXT
+      nodes.select! do |node|
+        w, h = page.evaluate("JSON.parse(JSON.stringify(arguments[0].getBoundingClientRect()))", node.node).values_at("width", "height")
+        areas = page.evaluate(<<~HEREDOC, node.node).flat_map{ |_| _.values.map{ |_| _["width"] * _["height"] } }
+          (function(node){
+            let result = [], range = document.createRange();
+            for (
+                let iterator = document.evaluate('.//text()', node, null, XPathResult.ANY_TYPE, null);
+                text = iterator.iterateNext();
+            ) {
+              range.selectNode(text);
+              result.push(JSON.parse(JSON.stringify(range.getClientRects())));
+            }
+            return result;
+          })(arguments[0])
+        HEREDOC
+        0.5 < areas.reduce(0, :+) / w / h
+      end
+      logger.info "text nodes: #{nodes.size}"
+    end
+File.write "temp_nodes.htm", nodes.extend(Dumpable).dump
+
+    # large = nodes#.select{ |i| i[ww] > nodes.map(&ww).max / 4 }
+    # logger.info "large enough: #{large.size}"
 
     interfere = lambda do |a, b|
       a[tt] < b[tt] + b[hh] &&
       b[tt] < a[tt] + a[hh]
     end
 
-    rest = large.select.with_index do |a, i|
-      large.each_with_index.none? do |b, j|
+    rest = nodes.select.with_index do |a, i|
+      nodes.each_with_index.none? do |b, j|
         next if i == j
         a[tt] >= b[tt] && a[tt] + a[hh] <= b[tt] + b[hh] &&
-        large.all?{ |c| interfere[a, c] == interfere[b, c] }
+        nodes.all?{ |c| interfere[a, c] == interfere[b, c] }
       end
     end
     logger.info "not nested: #{rest.size}"
     # rest = rest.sample 50
 
     # adding the :area field for faster upcoming computations
-    struct = Struct.new *large.first.members, :area
+    struct = Struct.new *nodes.first.members, :area
     rest.map!{ |i| struct.new *i.values, i.width * i.height }
 
     require "pcbr"
@@ -202,38 +225,39 @@ module PageRecognizer
         sol = rest.values_at *is, i
         pcbr.store [*is, i].sort, [
           *( is.size                                                                                                                if heuristics.include? :SIZE   ),
-          *( sol.map(&:area).inject(:+)                                                                                             if heuristics.include? :AREA   ),
+          *( sol.map(&:area).reduce(:+)                                                                                             if heuristics.include? :AREA   ),
           # https://en.wikipedia.org/wiki/Mean_absolute_difference
-          *( -sol.product(sol).map{ |s1, s2| (s1.width              - s2.width             ).abs }.inject(:+) / sol.size / sol.size if heuristics.include? :WIDTH  ),
-          *( -sol.product(sol).map{ |s1, s2| (s1.height             - s2.height            ).abs }.inject(:+) / sol.size / sol.size if heuristics.include? :HEIGHT ),
-          *( -sol.product(sol).map{ |s1, s2| (s1[ll] + s1[ww] / 2.0 - s2[ll] - s2[ww] / 2.0).abs }.inject(:+) / sol.size / sol.size if heuristics.include? :MIDDLE ),
+          *( -sol.product(sol).map{ |s1, s2| (s1.width              - s2.width             ).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :WIDTH  ),
+          *( -sol.product(sol).map{ |s1, s2| (s1.height             - s2.height            ).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :HEIGHT ),
+          *( -sol.product(sol).map{ |s1, s2| (s1[ll] + s1[ww] / 2.0 - s2[ll] - s2[ww] / 2.0).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :MIDDLE ),
         ] unless pcbr.set.include? [*is, i].sort
       end
       if prev && Time.now - time > 1 && (Time.now - prev > (prev - time))
         m = pcbr.table.reject{ |i| i.first.size < 2 }.map(&:last).max
         break if 1 == pcbr.table.count{ |i| i.last == m } || Time.now - time > 5
       end
-      break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.inject(:+) }.max_by(&:last)
+      break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)
       if t.last > max
         prev, max = Time.now, t.last
         logger.debug [Time.now - time, max, t.first]
       end
-      past.push (is = t.first).map{ |i| 2**i }.inject(:+)
+      past.push (is = t.first).map{ |i| 2**i }.reduce(:+)
     end
     # TODO: if multiple with max score, take the max by area
     unless best = pcbr.table.reject{ |is,| is.size < 2 }.max_by(&:last)
-      raise ErrorNotEnoughNodes.new "failed to split <#{tag_name}>", all: all, inside: inside, nodes: nodes, large: large, rest: rest
+      raise ErrorNotEnoughNodes.new "failed to split <#{tag_name}>", all: all, inside: inside, nodes: nodes, rest: rest
     end
+    logger.info "splitted in #{best.first.size}"
     rest.values_at(*best.first).extend Dumpable
   end
 
-  def rows *heuristics
+  def rows additional_heuristics = [], *heuristics
     heuristics = %i{ AREA HEIGHT WIDTH } if heuristics.empty?
-    split heuristics, :height, :width, :top, :left
+    split heuristics + additional_heuristics, :height, :width, :top, :left
   end
-  def cols *heuristics
+  def cols additional_heuristics = [], *heuristics
     heuristics = %i{ AREA HEIGHT WIDTH } if heuristics.empty?
-    split heuristics, :width, :height, :left, :top
+    split heuristics + additional_heuristics, :width, :height, :left, :top
   end
 
   def self.piles z
@@ -275,11 +299,11 @@ module PageRecognizer
     inside = all.reject{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
     raise ErrorNotEnoughNodes.new "no inside nodes", all: all, inside: inside if inside.empty?
     logger.info "inside nodes: #{inside.size}"
-    nodes = inside.reject{ |i| %w{ button script svg path a img span }.include? i.node.tag_name }.uniq{ |i| [i.height, i.width, i.top, i.left] }
-    logger.info "good and unique: #{nodes.size}"   # only those that might be containers
+    good = inside.reject{ |i| %w{ button script svg path a img span }.include? i.node.tag_name }.uniq{ |i| [i.height, i.width, i.top, i.left] }
+    logger.info "good and unique: #{good.size}"   # only those that might be containers
 
-    large = nodes
-    logger.info "large enough: #{large.size}"
+    # large = good#.select{ |i| i[ww] > good.map(&ww).max / 4 }
+    # logger.info "large enough: #{large.size}"
 
     interfere = lambda do |a, b|
       a.top < b.top + b.height &&
@@ -288,12 +312,12 @@ module PageRecognizer
       b.left < a.left + a.width
     end
 
-    rest = large.select.with_index do |a, i|
-      large.each_with_index.none? do |b, j|
+    rest = good.select.with_index do |a, i|
+      good.each_with_index.none? do |b, j|
         next if i == j
         a.top >= b.top && a.top + a.height <= b.top + b.height &&
         a.left >= b.left && a.left + a.width <= b.left + b.width &&
-        large.all?{ |c| interfere[a, c] == interfere[b, c] }
+        good.all?{ |c| interfere[a, c] == interfere[b, c] }
       end
     end
     logger.info "not nested: #{rest.size}"
@@ -336,17 +360,17 @@ module PageRecognizer
           next if xn.product(yn).any?{ |i,j| (i & j).size > 1 }
         end
         pcbr.store sorted, [
-          *( sol.map(&:area).inject(:+) if heuristics.include? :AREA ),
+          *( sol.map(&:area).reduce(:+) if heuristics.include? :AREA ),
           xn.size * yn.size,
-          xn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.left, s1.width, s2.left, s2.width] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / xn.size,
-          yn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.top, s1.height, s2.top, s2.height] }.inject(:+) / sosol.size / (sosol.size - 1) * 2 }.inject(:+) / yn.size,
+          xn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.left, s1.width, s2.left, s2.width] }.reduce(:+) / sosol.size / (sosol.size - 1) * 2 }.reduce(:+) / xn.size,
+          yn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.top, s1.height, s2.top, s2.height] }.reduce(:+) / sosol.size / (sosol.size - 1) * 2 }.reduce(:+) / yn.size,
         ]
         if prev && Time.now - time > 1 && (Time.now - prev > (prev - time) * 2 || Time.now - prev > 3)
           m = pcbr.table.reject{ |i| i.first.size < 3 }.map(&:last).max
           break if 1 == pcbr.table.count{ |i| i.last == m } || Time.now - time > 3
         end
-        break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.inject(:+) }.max_by(&:last)  # why reject?!
-        past.push is.map{ |i| 2**i }.inject(:+)
+        break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)  # why reject?!
+        past.push is.map{ |i| 2**i }.reduce(:+)
         if t.last > max && (!prev_max || t.first != prev_max)
           prev, max, prev_max = Time.now, t.last, t.first
           logger.debug [pcbr.table.size, max, t.first]

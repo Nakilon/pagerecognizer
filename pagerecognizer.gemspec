@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name         = "pagerecognizer"
-  spec.version      = "0.0.1"
+  spec.version      = "0.1.0"
   spec.summary      = "visual HTML page structure recognizer"
 
   spec.author       = "Victor Maslov aka Nakilon"
@@ -17,7 +17,6 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "byebug"
   spec.add_development_dependency "mll"
 
-  spec.require_path = "lib"
   spec.test_file    = "test.rb"
   spec.files        = %w{ LICENSE pagerecognizer.gemspec lib/pagerecognizer.rb }
 end
