@@ -1,31 +1,35 @@
 require "ferrum"                              # currently only Ferrum is supported but it should be trivial to add Selenium
-require_relative "lib/pagerecognizer"         # or `require "pagerecognizer"` if you are using it as a gem
+require_relative "lib/pagerecognizer"
+# PageRecognizer.logger.level = Logger::DEBUG # loglevel is FATAL by default
 Ferrum::Node.include PageRecognizer           # here we add Ferrum nodes the magic methods
 
+# it can run headless but we want to watch
 browser = Ferrum::Browser.new headless: false
 browser.goto "https://google.com/"
 browser.at_css("input[type=text]").focus.type "Ruby", :enter
-sleep 2   # https://github.com/rubycdp/ferrum/issues/114
+browser.wait_for_reload 1   # https://github.com/rubycdp/ferrum/issues/114
 
-# by default the `PageRecognizer#rows` method looks for blocks that are similar in size
-# so if we want to split into blocks that ...
-results = browser.at_css("body").rows [:TEXT]       # Array of Structs that have a `.node` attribute (`Ferrum::Node`)
-File.write "temp1.htm", results.dump
+results = browser.at_css("body").rows([:AREA, :SIZE]) do |node|
+  # `node` is a search result candidate we want to apply some checks to
+  texts = node.texts
+  next if texts.none?{ |text, style, color, | :black == color }
+  _, group = texts.group_by{ |text, style, | style["fontSize"].to_i }.to_a.max_by(&:first)
+  next unless group  # the largest text should be blue
+  next unless group.size == 1 && %i{ blue navy }.include?(group[0][2])
+  next if node.node.at_css "img"  # we aren't interested in video results
+  true
+end
+puts "#{results.size} search results"
+File.write "dump.htm", results.dump
+
 # this .htm file is a dump -- that colored thing from docs
-# (there is also a method `PageRecognizer.load` to load a dump for later observation)
-# now if we observe the dump we'll see that we need those 9 blocks with the same width
-width, group = results.group_by(&:width).max_by{ |_, g| g.size }
+# (there is also a method `PageRecognizer.load` to load a dump for later inspection)
 
-puts "#{group.size} search results"
-group.map(&:node).each{ |_| browser.execute "arguments[0].style['background-color'] = 'yellow'", _}
+results.map(&:node).each{ |_| browser.execute "arguments[0].style['background-color'] = 'yellow'", _ }
+gets  # we paint the found nodes in yellow to observe
 
-splitted = group.map(&:node).map{ |i| i.rows([], :SIZE, :AREA, :MIDDLE) }
-# if you want to see how every result was splitted, join them and dump like this
-File.write "temp2.htm", splitted.flatten(1).extend(PageRecognizer::Dumpable).dump
-
-
-require "mll"   # just an old fancy gem of mine for printing a table
-puts MLL.grid.call splitted.map{ |link, desc| [
-  link.node.at_css("a").property("href")[0,40],
-  desc.node.text.sub(/(.{40}) .+/, "\\1..."),
+require "mll"   # just an old fancy gem of mine that can print tables
+puts MLL.grid.call results.map{ |result| [
+  result.node.at_css("a").property("href")[0,40],
+  result.texts.max_by{ |t, s, | s["fontStyle"].to_i }[0].sub(/(.{40}) .+/, "\\1..."),
 ] }, spacings: [2, 0], alignment: :left

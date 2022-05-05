@@ -1,53 +1,92 @@
 [![Gem Version](https://badge.fury.io/rb/pagerecognizer.svg)](http://badge.fury.io/rb/pagerecognizer)
 [![Test](https://github.com/nakilon/pagerecognizer/workflows/.github/workflows/test.yaml/badge.svg)](https://github.com/Nakilon/pagerecognizer/actions)
 
-The idea is to forget that DOM is a tree and view the page as a human. Then apply smart algorithms to recognize the main blocks that really form a UI.
+# Pagerecognizer -- the visual web page structure recognizing A.I. tool
+
+The idea is to forget that DOM is a tree and view the page like a human would do. Then apply smart algorithms to recognize the main blocks that really form a UI.
 This is particularly useful in test automation because HTML/CSS internals are changing more frequently than design.
 
-### Example of splitting in cols and rows ([google.example.rb](google.example.rb) is much more updated than this readme):
+### Example of splitting in rows (also check [`./google.example.rb`](google.example.rb) for some other details):
 
-Let's open a website:
+I'll show how to use this tool on www.google.com as an exmple. The HTML page of it might already have some convenient ids or classes but let's pretend there are none. Currently the gem utilizes the Ferrum so you may already know some basic methods:
 ```ruby
 require "ferrum"
-require_relative "lib/pagerecognizer"
+require "pagerecognizer"
 Ferrum::Node.include PageRecognizer
 
 browser = Ferrum::Browser.new
 browser.goto "https://google.com/"
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/google.com.png)  
-Now `#recognize` elements that matter:
+Let's call the private method `#recognize` just to see what it would see and export the result like this:
 ```ruby
-File.write "dump.htm", browser.at_css("body").recognize.dump
+File.write "dump.htm", browser.at_css("body").send(:recognize).dump
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/google.com.recognized.jpg)  
-Ok, let's try something more complex:
+
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/google.png)
+
+This is a nodes rects view that the A.I. will use later for the recognition. Let's do a web search and see what it sees now:
 ```ruby
 browser.at_css("input[type=text]").focus.type "Ruby", :enter
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.recognized_.jpg)  
-Or find the main vertical sections (`#rows`) that the page consists of:
+
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/ruby.png)
+
+Now let's try the magic method `#rows` and see if it has recognized the search results sections of the page.
 ```ruby
-browser.at_css("body").rows
+File.write "dump.htm", browser.at_css("body").rows([:AREA, :SIZE]).dump
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.rows.png)  
-Now if we do the same thing to the largest block we've just found:  
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/ruby.main.jpg)  
-You may already have a guess how to find which of these are text results.  
-The rest is simple. Full example script is included in this repo:
-```none
-$ bundle install && bundle exec ruby google.example.rb
-                                                                                                                              
-  https://www.ruby-lang.org/ru/                                           Ruby это... динамический язык программирования...   
-  https://ru.wikibooks.org/wiki/Ruby                                      Этот учебник намерен осветить все тонкости...       
-  https://habr.com/ru/post/433672/                                        19 дек. 2018 г. - Взрывной рост интереса...         
-  https://habr.com/ru/hub/ruby/                                           Секрет в том, что на Ruby можно быстро написать...  
-  https://web-creator.ru/articles/ruby                                    Ruby разрабатывался на Linux, но работает...        
-  http://rusrails.ru/                                                     Ruby on Rails руководства, учебники, статьи...      
-  https://vc.ru/dev/72391-pochemu-my-vybiraem-ruby-dlya-nashih-proektov   20 июн. 2019 г. - Ruby on Rails одним из...         
-  https://tproger.ru/tag/ruby/                                            Django или Ruby on Rails: какой фреймворк...        
+`:AREA` and `:SIZE` are the recommended euristics for the `rows` and `cols` methods, you can find others in the source code.
+
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/rows.png)
+
+The Google Search page is complex today and as you can see with the default options it did not recognize the first result and misrecognized others. The misrecognized ones either have no blue hyperlinks or no text at all. What can we do? Each recognized node has a method `#texts` that allows us to access the text blocks and their style. It also recognizes text color classifying it based on [16 Basic Web colors](https://en.wikipedia.org/wiki/Web_colors#Basic_colors). Let's use it and add a custom euristic that would give a hint to process only such nodes that contain black and blue text:
+```ruby
+results = browser.at_css("body").rows([:AREA, :SIZE]) do |node|
+  colors = node.texts.map{ |text, style, color, | color }
+  colors.any?{ |c| :black == c } &&
+  colors.any?{ |c| :blue == c || :navy == c }
+end
+File.write "dump.htm", results.dump
 ```
-Yay! We have just scraped Google Search results page knowing only that it has `<body>` and `<a>` tags and nothing else about attributes or DOM structure.
+
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/blackblue.png)
+
+Custom euristic not only helps the A.I. but also may make the recognition faster because it makes less nodes to process. It still picks wrong nodes though. Then let's select such that the biggest text in them is blue and happens only once. Also throw out the nodes with images because we are not interested in video results (note that we use `.node` since the `node` is a recognized object, a structure, and `.node` is the actual Ferrum object):
+```ruby
+... do |node|
+  texts = node.texts
+  next if texts.none?{ |text, style, color, | :black == color }
+  _, group = texts.group_by{ |text, style, | style["fontSize"].to_i }.to_a.max_by(&:first)
+  next unless group  # the largest text should be blue
+  next unless group.size == 1 && %i{ blue navy }.include?(group[0][2])
+  next if node.node.at_css "img"  # we aren't interested in video results
+  true
+end
+```
+
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/perfect.png)
+
+Perfect. Now we can parse them:
+```ruby
+results.map do |result|
+  [
+    result.node.at_css("a").property("href")[0,40],
+    result.texts.max_by{ |t, s, | s["fontStyle"].to_i }[0].sub(/(.{40}) .+/, "\\1..."),
+  ]
+end
+```
+```none                                                                 
+  https://ru.wikipedia.org/wiki/Ruby         Ruby - Википедия                                   
+  https://www.ruby-lang.org/ru/              Язык программирования Ruby                         
+  https://evrone.ru/why-ruby                 5 причин, почему мы выбираем Ruby - evrone.ru      
+  https://habr.com/ru/hub/ruby/              Ruby — Динамический высокоуровневый язык...        
+  https://ru.wikibooks.org/wiki/Ruby         Ruby - Викиучебник                                 
+  https://context.reverso.net/%D0%BF%D0%B5   ruby - Перевод на русский - примеры английский...  
+  https://web-creator.ru/articles/ruby       Язык программирования Ruby - Веб Креатор           
+  https://ru.hexlet.io/courses/ruby          Введение в Ruby - Хекслет                          
+  https://www.ozon.ru/product/yazyk-progra   Книга "Язык программирования Ruby" - OZON        
+```
+We've just scraped the SERP knowing nothing about its DOM other that there are big blue links with black descriptions!
 
 ### Example of grid detection
 
@@ -61,5 +100,6 @@ grid.cols.map(&:size)  # => [8, 8, 8]
 grid.rows.size         # => 8
 grid.rows.map(&:size)  # => [3, 3, 3, 3, 3, 3, 3, 3]
 ```
-![](https://storage.googleapis.com/pagerecognizer.nakilon.pro/youtube.grid.png)  
+![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/youtube.grid.png)
+
 

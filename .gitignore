@@ -2,3 +2,6 @@
 /pkg
 /.byebug_history
 /temp*
+/*.temp
+/dump*.htm
+/*.png

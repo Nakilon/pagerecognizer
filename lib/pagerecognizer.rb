@@ -4,15 +4,16 @@ module PageRecognizer
   end
   require "logger"
   self.logger = Logger.new STDOUT
+  self.logger.formatter = ->(severity, datetime, progname, msg){ "#{datetime.strftime "%H%M%S"} #{severity.to_s[0]} #{msg}\n" }
   self.logger.level = ENV.fetch("LOGLEVEL_PageRecognizer", "FATAL").to_sym
 
   module Dumpable
     def dump
-      "<html><body>#{
+      "<html><body style='white-space: nowrap'>#{
         map.with_index do |n, i|
-          "<div style='position: absolute; background-color: hsla(#{
+          "<div id='#{i}' style='position: absolute; background-color: hsla(#{
             360 * i / size
-          },100%,50%,0.5); top: #{n.top}; left: #{n.left}; width: #{n.width}; height: #{n.height}'>#{
+          },100%,50%,0.5); top: #{n.top}; left: #{n.left}; width: #{n.width}; height: #{n.height}'>#{i} #{
             n.node.tag_name.upcase
           }</div>"
         end.join
@@ -30,92 +31,108 @@ module PageRecognizer
     end.extend Dumpable
   end
 
-  def recognize
-    logger = Module.nesting.first.logger
-
-    nodes = []
-    try = lambda do
-      prev = nodes
-      code = "( function(node) {
-        var x = scrollX, y = scrollY;
-        var _tap = function(x, f){ f(); return x };
-        var f = function(node) {
-          node.scrollIntoView();
-          var rect = JSON.parse(JSON.stringify(node.getBoundingClientRect()));
-          var child_nodes = Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 });
-          var clickable;
-          if (node.nodeName == 'svg') {
-            var states = child_nodes.map( function(n){
-              return _tap(n.style ? n.style.display : '', function(){ n.style.display = 'none' } );
-            } );
-            clickable = (node === document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2));
-            var _zip = function(a, b){ return a.map( function(e, i) { return [e, b[i]] } ) };
-            _zip(child_nodes, states).forEach( function(_){ _[0].style.display = _[1] } );
-          } else {
-            clickable = (node === document.elementFromPoint(rect.x + rect.width/2, rect.y + rect.height/2));
-          };
-          rect.top += scrollY;
-          rect.left += scrollX;
-          return [ [
-            rect.top, rect.left, rect.width, rect.height, clickable, node
-          ] ].concat(node.nodeName == 'svg' ? [] : child_nodes.flatMap(f));
-        };
-        return _tap(f(node), function(){ scrollTo(x, y) });
-      } )(arguments[0])"
-      str = Struct.new :top, :left, :width, :height, :clickable, :node
-      nodes = page.evaluate(code, self).map{ |s| str.new *s }
-      nodes.size == prev.size
-    end
-
-    if defined? Selenium::WebDriver::Wait
-      Selenium::WebDriver::Wait.new(
-        message: "number of DOM elements didn't stop to change"
-      ).until &try
-    else
-      t = Time.now
-      until try.call
-        fail "number of DOM elements didn't stop to change" if Time.now > t + 5
-      end
-    end
-    logger.info "#{nodes.size} DOM nodes found"
-
-    nodes.select! &:clickable
-    nodes.reject do |n|
-      nodes.any? do |nn|
-        cs = [
-          nn.top <=> n.top,
-          nn.left <=> n.left,
-          n.left + n.width <=> nn.left + nn.width,
-          n.top + n.height <=> nn.top + nn.height,
-        ]
-        cs.include?(1) && !cs.include?(-1)
-      end
-    end.extend Dumpable
+  def self.rgb2hsv r, g, b   # [<256, <256, <256]
+    # http://stackoverflow.com/q/41926874/322020
+    r, g, b  = [r, g, b].map{ |_| _.fdiv 255 }
+    min, max = [r, g, b].minmax
+    chroma   = max - min
+    [
+      60.0 * ( chroma.zero? ? 0 : case max
+        when r ; (g - b) / chroma
+        when g ; (b - r) / chroma + 2
+        when b ; (r - g) / chroma + 4
+        else 0
+      end % 6 ),
+      chroma.zero? ? 0.0 : chroma / max,
+      max,
+    ]   # [<=360, <=1, <=1]
+  end
+  def self.dist h1, s1, v1, h2, s2, v2   # [<256, <256, <256]
+    # https://en.wikipedia.org/wiki/HSL_and_HSV#/media/File:Hsl-hsv_saturation-lightness_slices.svg
+    c1, c2 = s1 * v1 / 256.0, s2 * v2 / 256.0   # chroma
+    z1, z2 = v1 * (2 - c1 / 256), v2 * (2 - c2 / 256)
+    a = (((h2 - h1) * 360 / 256.0) % 360) / (180 / Math::PI)
+        x2 =     Math::sin(a) * c2
+    y1, y2 = c1, Math::cos(a) * c2
+    x2*x2 + (y1-y2)*(y1-y2) + (z1-z2)*(z1-z2)
   end
 
-  private def recognize_more
+  private def recognize
     logger = Module.nesting.first.logger
+    logger.info "method #{__method__}..."
 
     nodes = []
     try = lambda do
-      prev = nodes
-      code = "( function(node) {
-        var x = scrollX, y = scrollY;
-        var _tap = function(x, f){ f(); return x };
-        var f = function(node) {
-          node.scrollIntoView();
-          var rect = JSON.parse(JSON.stringify(node.getBoundingClientRect()));
-          rect.top += scrollY;
-          rect.left += scrollX;
-          return [ [
-            node, JSON.stringify([rect.top, rect.left, rect.width, rect.height])
-          ] ].concat(Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 }).flatMap(f));
-        };
-        return _tap(f(node), function(){ scrollTo(x, y) });
-      } )(arguments[0])"
-      str = Struct.new :node, :top, :left, :width, :height
-      nodes = page.evaluate(code, self).map{ |node, a| str.new node, *JSON.load(a) }
-      nodes.size == prev.size
+      str = Struct.new :node, :visible, :top, :left, :width, :height, :area do
+        def texts
+          node.page.evaluate(<<~HEREDOC, node).map(&JSON.method(:load)).map do |text, rect1, rect2, style|
+            (function(node){
+              let result = [], range = document.createRange();
+              for (
+                let iterator = document.evaluate('.//text()', node, null, XPathResult.ANY_TYPE, null);
+                text = iterator.iterateNext();
+              ) {
+                range.selectNode(text);
+                result.push(JSON.stringify( [
+                  text.wholeText,
+                  range.getBoundingClientRect(),
+                  text.parentNode.getBoundingClientRect(),
+                  getComputedStyle(text.parentNode),
+                ] ));
+              }
+              return result;
+            })(arguments[0])
+          HEREDOC
+
+            # google SERP has 1x1 nodes with text _<>
+            next if rect1["width"] < 2 || rect1["height"] < 2
+            next if rect2["width"] < 2 || rect2["height"] < 2
+
+            color = style["color"]
+            fail color unless /\Argba?\((?<red>\d+), (?<green>\d+), (?<blue>\d+)(, 0(\.\d+)?)?\)\z/ =~ color
+            closest_color = {   # https://en.wikipedia.org/wiki/Web_colors#Basic_colors
+              white: [0, 0, 100],
+              silver: [0, 0, 75],
+              gray: [0, 0, 50],
+              black: [0, 0, 0],
+              red: [0, 100, 100],
+              maroon: [0, 100, 50],
+              yellow: [60, 100, 100],
+              olive: [60, 100, 50],
+              lime: [120, 100, 100],
+              green: [120, 100, 50],
+              aqua: [180, 100, 100],
+              teal: [180, 100, 50],
+              blue: [240, 100, 100],
+              navy: [240, 100, 50],
+              fuchsia: [300, 100, 100],
+              purple: [300, 100, 50],
+            }.to_a.min_by do |_, (h1, s1, v1)|
+              h2, s2, v2 = PageRecognizer.rgb2hsv(red.to_i, green.to_i, blue.to_i)
+              PageRecognizer.dist h1*255/360, s1*256/100, v1*256/100, h2*255/360, s2*255, v2*255
+            end.first
+            [text, style, closest_color, rect1]
+          end.compact
+        end
+      end
+      prev = nodes.size
+      nodes = page.evaluate(<<~HEREDOC, self).map{ |node, rect, visible| str.new(node, visible, *JSON.load(rect)).tap{ |_| _.area = _.width * _.height } }
+        ( function(node) {
+          var x = scrollX, y = scrollY;
+          var _tap = function(x, f){ f(); return x };
+          var f = function(node) {
+            node.scrollIntoView();
+            var rect = JSON.parse(JSON.stringify(node.getBoundingClientRect()));
+            rect.top += scrollY;
+            rect.left += scrollX;
+            return [ [
+              node, JSON.stringify([rect.top, rect.left, rect.width, rect.height]), ("visible" == getComputedStyle(node).visibility)
+            ] ].concat(Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 }).flatMap(f));
+          };
+          return _tap(f(node), function(){ scrollTo(x, y) });
+        } )(arguments[0])
+      HEREDOC
+      nodes.size == prev
     end
 
     if defined? Selenium::WebDriver::Wait
@@ -129,9 +146,9 @@ module PageRecognizer
       end
     end
     logger.info "#{nodes.size} DOM nodes found"
-
-    nodes.reject!{ |i| i.height.zero? || i.width.zero? }
-    nodes
+    nodes.reject!{ |_| _.height.zero? || _.width.zero? || !_.visible }
+    logger.info "visible nodes: #{nodes.size}"
+    nodes.extend Dumpable
   end
 
   logging_error = Class.new RuntimeError do
@@ -144,8 +161,9 @@ module PageRecognizer
   end
   class ErrorNotEnoughNodes < logging_error ; end
 
-  private def split heuristics, hh, ww, tt, ll
+  private def split hh, ww, tt, ll, heuristics, try_min, &filter
     logger = Module.nesting.first.logger
+    logger.info heuristics
 
     unstale = unless defined? Selenium::WebDriver::Error::StaleElementReferenceError
       ->(&b){ b.call }
@@ -160,104 +178,123 @@ module PageRecognizer
         end
       end
     end
-    all = unstale.call do recognize_more end.sort_by(&tt)
-    logger.info "all page nodes: #{all.size}"
-    rect = page.evaluate "JSON.parse(JSON.stringify(arguments[0].getBoundingClientRect()))", self
-    inside = all.reject{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
-    raise ErrorNotEnoughNodes.new "no inside nodes", all: all, inside: inside if inside.empty?
-    logger.info "nodes within: #{inside.size}"
-    nodes = unstale.call do inside.reject{ |i| %w{ button script svg path a img span }.include? i.node.tag_name } end.uniq{ |i| [i[hh], i[ww], i[tt], i[ll]] }
+
+    all = unstale.call do recognize end.sort_by{ |_| [_[tt], _[ll]] }
+    File.write "dump.all.htm", all.extend(Dumpable).dump
+
+    nodes = all
+
+    nodes = unstale.call do nodes.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name } end.uniq{ |_| [_[hh], _[ww], _[tt], _[ll]] }
     logger.info "good and unique: #{nodes.size}"   # only those that might be containers
-
-    if heuristics.include? :TEXT
-      nodes.select! do |node|
-        w, h = page.evaluate("JSON.parse(JSON.stringify(arguments[0].getBoundingClientRect()))", node.node).values_at("width", "height")
-        areas = page.evaluate(<<~HEREDOC, node.node).flat_map{ |_| _.values.map{ |_| _["width"] * _["height"] } }
-          (function(node){
-            let result = [], range = document.createRange();
-            for (
-                let iterator = document.evaluate('.//text()', node, null, XPathResult.ANY_TYPE, null);
-                text = iterator.iterateNext();
-            ) {
-              range.selectNode(text);
-              result.push(JSON.parse(JSON.stringify(range.getClientRects())));
-            }
-            return result;
-          })(arguments[0])
-        HEREDOC
-        0.5 < areas.reduce(0, :+) / w / h
-      end
-      logger.info "text nodes: #{nodes.size}"
-    end
-File.write "temp_nodes.htm", nodes.extend(Dumpable).dump
-
-    # large = nodes#.select{ |i| i[ww] > nodes.map(&ww).max / 4 }
-    # logger.info "large enough: #{large.size}"
+    File.write "dump.nodes.htm", nodes.extend(Dumpable).dump
 
     interfere = lambda do |a, b|
       a[tt] < b[tt] + b[hh] &&
       b[tt] < a[tt] + a[hh]
     end
 
-    rest = nodes.select.with_index do |a, i|
-      nodes.each_with_index.none? do |b, j|
+    rest = nodes
+
+    rest = rest.select.with_index do |a, i|
+      rest.each_with_index.none? do |b, j|
         next if i == j
         a[tt] >= b[tt] && a[tt] + a[hh] <= b[tt] + b[hh] &&
-        nodes.all?{ |c| interfere[a, c] == interfere[b, c] }
+        a[ll] >= b[ll] && a[ll] + a[ww] <= b[ll] + b[ww] &&
+        rest.all?{ |c| interfere[a, c] == interfere[b, c] }
       end
     end
     logger.info "not nested: #{rest.size}"
-    # rest = rest.sample 50
+    File.write "dump.rest1.htm", rest.extend(Dumpable).dump
 
-    # adding the :area field for faster upcoming computations
-    struct = Struct.new *nodes.first.members, :area
-    rest.map!{ |i| struct.new *i.values, i.width * i.height }
+    # 8 = max_results - 1, 3 = (from row size diff euristic)
+    if try_min
+      rest = rest.reject{ |_| _[hh] + _[hh]/3*(try_min - 1) > (rest.map{ |_| _[tt] + _[hh] }.max - rest.map(&tt).min) }
+      logger.info "small enough: #{rest.size}"
+    end
+    File.write "dump.rest2.htm", rest.extend(Dumpable).dump
+
+    rest.select! &filter
+    logger.info "filtered: #{rest.size}"
+    File.write "dump.rest3.htm", rest.extend(Dumpable).dump
+
+    rest.sort_by!(&:area).reverse!
+    File.write "dump.sorted.htm", rest.extend(Dumpable).dump
 
     require "pcbr"
     pcbr = PCBR.new
     is = []
-    max, past = 0, []
+    max, past = 0, Set.new
     prev = nil
     time = Time.now
     loop do
-      rest.each_with_index do |node, i|
-        next if is.any?{ |j| i == j || interfere[rest[i], rest[j]] }
+      si = (0...rest.size).reject do |i|
+        # I don't shrink pcbr so this should be a safe optimization
+        next true if is.last > i unless is.empty?
+        # also we've sorted from large to small so it does not get stuck with the half of the page below the largest node
+
+        next (logger.debug [i, 2]; true) if is.any?{ |j| i == j || interfere[rest[i], rest[j]] }
+        next (logger.debug [i, 3]; true) if is.any?{ |j| rest[i][ww] > rest[j][ww] * 2 } if heuristics.include? :WIDTH
+        next (logger.debug [i, 4]; true) if is.any?{ |j| rest[j][ww] > rest[i][ww] * 2 } if heuristics.include? :WIDTH
+        next (logger.debug [i, 5]; true) if is.any?{ |j| rest[i][hh] > rest[j][hh] * 3 }
+        next (logger.debug [i, 6]; true) if is.any?{ |j| rest[j][hh] > rest[i][hh] * 3 }
+      end
+      logger.debug [is, si]
+      si.each do |i|
         sol = rest.values_at *is, i
+        unless pcbr.set.include? [*is, i].sort
+        logger.debug [is, i, sol.map(&:area).reduce(:+)]
         pcbr.store [*is, i].sort, [
           *( is.size                                                                                                                if heuristics.include? :SIZE   ),
           *( sol.map(&:area).reduce(:+)                                                                                             if heuristics.include? :AREA   ),
           # https://en.wikipedia.org/wiki/Mean_absolute_difference
-          *( -sol.product(sol).map{ |s1, s2| (s1.width              - s2.width             ).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :WIDTH  ),
           *( -sol.product(sol).map{ |s1, s2| (s1.height             - s2.height            ).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :HEIGHT ),
           *( -sol.product(sol).map{ |s1, s2| (s1[ll] + s1[ww] / 2.0 - s2[ll] - s2[ww] / 2.0).abs }.reduce(:+) / sol.size / sol.size if heuristics.include? :MIDDLE ),
-        ] unless pcbr.set.include? [*is, i].sort
+        ]
+          logger.debug "pcbr.table.size: #{pcbr.table.size}"
+          if si.none? do |j|
+            next if j <= i
+            next true if interfere[rest[i], rest[j]]
+            next true if rest[i][ww] > rest[j][ww] * 2 if heuristics.include? :WIDTH
+            next true if rest[j][ww] > rest[i][ww] * 2 if heuristics.include? :WIDTH
+            next true if rest[i][hh] > rest[j][hh] * 3
+            next true if rest[j][hh] > rest[i][hh] * 3
+          end
+            logger.debug "forced"
+            break
+          end
+        end
       end
-      if prev && Time.now - time > 1 && (Time.now - prev > (prev - time))
+      if prev && Time.now - time > 5
+        logger.debug "check"
+        break logger.info "break 0" if Time.now - time > 30
+        break logger.info "break 1" if Time.now - prev > 10
         m = pcbr.table.reject{ |i| i.first.size < 2 }.map(&:last).max
-        break if 1 == pcbr.table.count{ |i| i.last == m } || Time.now - time > 5
+        break logger.info "break 2" if Time.now - prev > (prev - time) && 1 == pcbr.table.count{ |i| i.last == m }
       end
-      break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)
+      break logger.info "done" unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)
+      logger.debug "next: #{t}"
+      past.add (is = t.first).map{ |i| 2**i }.reduce(:+)
       if t.last > max
         prev, max = Time.now, t.last
+        logger.debug "new max: #{max}"
         logger.debug [Time.now - time, max, t.first]
       end
-      past.push (is = t.first).map{ |i| 2**i }.reduce(:+)
     end
     # TODO: if multiple with max score, take the max by area
     unless best = pcbr.table.reject{ |is,| is.size < 2 }.max_by(&:last)
-      raise ErrorNotEnoughNodes.new "failed to split <#{tag_name}>", all: all, inside: inside, nodes: nodes, rest: rest
+      raise ErrorNotEnoughNodes.new "failed to split <#{tag_name}>", all: all, nodes: nodes, rest: rest
     end
+    pcbr.table.max_by(20, &:last).each_with_index{ |_, i| logger.debug "##{i} #{_}" }
+    logger.info best
     logger.info "splitted in #{best.first.size}"
-    rest.values_at(*best.first).extend Dumpable
+    rest.values_at(*best.first).sort_by(&tt).extend Dumpable
   end
 
-  def rows additional_heuristics = [], *heuristics
-    heuristics = %i{ AREA HEIGHT WIDTH } if heuristics.empty?
-    split heuristics + additional_heuristics, :height, :width, :top, :left
+  def rows heuristics, try_min: nil, &b
+    split :height, :width, :top, :left, heuristics, try_min, &b
   end
-  def cols additional_heuristics = [], *heuristics
-    heuristics = %i{ AREA HEIGHT WIDTH } if heuristics.empty?
-    split heuristics + additional_heuristics, :width, :height, :left, :top
+  def cols heuristics, try_min: nil, &b
+    split :width, :height, :left, :top, heuristics, try_min, &b
   end
 
   def self.piles z
@@ -287,12 +324,12 @@ File.write "temp_nodes.htm", nodes.extend(Dumpable).dump
   def grid
     logger = Module.nesting.first.logger
 
-    all = recognize_more
+    all = recognize
     logger.info "all nodes: #{all.size}"
 
-    # adding the :area field for faster upcoming computations
-    struct = Struct.new *all.first.members, :area, :midx, :midy
-    all.map!{ |i| struct.new *i.values, i.width * i.height, i.left + i.width / 2.0, i.top * i.height / 2.0 }
+    # adding the fields for faster upcoming computations
+    struct = Struct.new *all.first.members, :midx, :midy
+    all.map!{ |i| struct.new *i.values, i.left + i.width / 2.0, i.top * i.height / 2.0 }
     all = all.sort_by{ |_| [_.area, _.top, _.left] }.reverse
 
     rect = page.evaluate("( function(node) { return JSON.parse(JSON.stringify(node.getBoundingClientRect())) } )(arguments[0])", self)
