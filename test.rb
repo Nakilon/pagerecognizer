@@ -39,9 +39,9 @@ describe PageRecognizer do
         ["https://ru.hexlet.io/courses/ruby", "Введение в Ruby - Хекслет"],
         ["https://rubyrush.ru/articles/what-is-rub", "Что такое Ruby on Rails?"],
       ] ],
-    ].each do |test_file, expectation|
+    ].each do |filename, expectation|
 
-    @browser.goto "file://#{File.expand_path test_file}"
+    @browser.goto "file://#{File.expand_path filename}"
     results = @browser.at_css("body").rows([:AREA, :SIZE], try_min: 9) do |node|
       texts = node.texts
       next if texts.none?{ |_, _, color, | :black == color }
@@ -59,12 +59,17 @@ describe PageRecognizer do
     end
   end
   it "youtube rows grid" do
-    @browser.goto "file://#{File.expand_path "youtube.mht"}"
-    assert_equal %w{ Главная Навигатор Shorts Подписки Библиотека История }, @browser.at_css("ytd-mini-guide-renderer").rows([:AREA, :SIZE]){ |_| !_.node.text.strip.empty? }.map{ |nav| nav.texts.first[0] }
-    grid = @browser.at_css("#content").grid
-    assert_equal 30, grid.size
-    assert_equal [3]*10, grid.rows.map(&:size)
-    assert_equal [10]*3, grid.cols.map(&:size)
-    grid.each{ |n| n.to_h.values_at(:width, :height).each{ |_| assert_in_delta 250, _, 50 } }
+    [
+      ["youtube.htm", %w{ Главная В\ тренде Подписки Библиотека История }, 8],
+      ["youtube2.mht", %w{ Главная Навигатор Shorts Подписки Библиотека История }, 10],
+    ].each do |filename, expected_navigation, rows|
+      @browser.goto "file://#{File.expand_path filename}"
+      assert_equal expected_navigation, @browser.at_css("ytd-mini-guide-renderer").rows([:AREA, :SIZE]){ |_| !_.node.text.strip.empty? }.map{ |nav| nav.texts.first[0] }
+      grid = @browser.at_css("#content").grid
+      assert_equal 3*rows, grid.size
+      assert_equal [3]*rows, grid.rows.map(&:size)
+      assert_equal [rows]*3, grid.cols.map(&:size)
+      grid.each{ |n| n.to_h.values_at(:width, :height).each{ |_| assert_in_delta 250, _, 50 } }
+    end
   end
 end

@@ -6,5 +6,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - run: docker run -e FERRUM_NO_SANDBOX=_ -v $(pwd):/test ruby:alpine sh -c "cd /test && apk add build-base chromium && bundle install && bundle exec ruby test.rb"
+    - run: docker run -e FERRUM_NO_SANDBOX=_ -v $(pwd):/test ruby:alpine sh -c "cd /test && apk add build-base chromium git && bundle install && bundle exec ruby test.rb"
       timeout-minutes: 3

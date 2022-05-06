@@ -57,9 +57,9 @@ Custom euristic not only helps the A.I. but also may make the recognition faster
   texts = node.texts
   next if texts.none?{ |text, style, color, | :black == color }
   _, group = texts.group_by{ |text, style, | style["fontSize"].to_i }.to_a.max_by(&:first)
-  next unless group  # the largest text should be blue
+  next unless group
   next unless group.size == 1 && %i{ blue navy }.include?(group[0][2])
-  next if node.node.at_css "img"  # we aren't interested in video results
+  next if node.node.at_css "img"
   true
 end
 ```
