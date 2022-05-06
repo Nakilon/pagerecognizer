@@ -163,7 +163,7 @@ module PageRecognizer
   end
   class ErrorNotEnoughNodes < logging_error ; end
 
-  private def split hh, ww, tt, ll, heuristics, try_min, &filter
+  private def split hh, ww, tt, ll, heuristics, try_min, dump, &filter
     logger = Module.nesting.first.logger
     logger.info heuristics
 
@@ -182,12 +182,12 @@ module PageRecognizer
     end
 
     nodes = unstale.call do recognize end.sort_by{ |_| [_[tt], _[ll]] }
-    File.write "dump.all.htm", nodes.extend(Dumpable).dump
+    File.write "#{dump}.all.htm", nodes.extend(Dumpable).dump if dump
 
 
     nodes = unstale.call do nodes.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name } end.uniq{ |_| [_[hh], _[ww], _[tt], _[ll]] }
     logger.info "good and unique: #{nodes.size}"   # only those that might be containers
-    File.write "dump.nodes.htm", nodes.extend(Dumpable).dump
+    File.write "#{dump}.nodes.htm", nodes.extend(Dumpable).dump if dump
 
     interfere = lambda do |a, b|
       a[tt] < b[tt] + b[hh] &&
@@ -204,21 +204,21 @@ module PageRecognizer
       end
     end
     logger.info "not nested: #{rest.size}"
-    File.write "dump.rest1.htm", rest.extend(Dumpable).dump
-
-    rest.select! &filter
-    logger.info "filtered: #{rest.size}"
-    File.write "dump.filtered.htm", rest.extend(Dumpable).dump
+    File.write "#{dump}.rest1.htm", rest.extend(Dumpable).dump if dump
 
     # 8 = max_results - 1, 3 = (from row size diff euristic)
     if try_min
       rest = rest.reject{ |_| _[hh] + _[hh]/3*(try_min - 1) > (rest.map{ |_| _[tt] + _[hh] }.max - rest.map(&tt).min) }
       logger.info "small enough: #{rest.size}"
     end
-    File.write "dump.rest2.htm", rest.extend(Dumpable).dump
+    File.write "#{dump}.rest2.htm", rest.extend(Dumpable).dump if dump
+
+    rest.select! &filter
+    logger.info "filtered: #{rest.size}"
+    File.write "#{dump}.filtered.htm", rest.extend(Dumpable).dump if dump
 
     rest.sort_by!(&:area).reverse!
-    File.write "dump.sorted.htm", rest.extend(Dumpable).dump
+    File.write "#{dump}.sorted.htm", rest.extend(Dumpable).dump if dump
 
     require "pcbr"
     pcbr = PCBR.new
@@ -290,11 +290,11 @@ module PageRecognizer
     rest.values_at(*best.first).sort_by(&tt).extend Dumpable
   end
 
-  def rows heuristics, try_min: nil, &b
-    split :height, :width, :top, :left, heuristics, try_min, &b
+  def rows heuristics, try_min: nil, dump: nil, &b
+    split :height, :width, :top, :left, heuristics, try_min, dump, &b
   end
-  def cols heuristics, try_min: nil, &b
-    split :width, :height, :left, :top, heuristics, try_min, &b
+  def cols heuristics, try_min: nil, dump: nil, &b
+    split :width, :height, :left, :top, heuristics, try_min, dump, &b
   end
 
   def self.piles z
@@ -321,12 +321,12 @@ module PageRecognizer
     end
   end
 
-  def grid
+  def grid dump = nil
     logger = Module.nesting.first.logger
 
     all = recognize
     logger.info "all nodes: #{all.size}"
-    File.write "dump.all.htm", all.extend(Dumpable).dump
+    File.write "#{dump}.all.htm", all.extend(Dumpable).dump if dump
 
     # adding the fields for faster upcoming computations
     struct = Struct.new *all.first.members, :midx, :midy
@@ -337,10 +337,10 @@ module PageRecognizer
     inside = all.reject{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
     raise ErrorNotEnoughNodes.new "no inside nodes", all: all, inside: inside if inside.empty?
     logger.info "inside nodes: #{inside.size}"
-    File.write "dump.inside.htm", inside.extend(Dumpable).dump
+    File.write "#{dump}.inside.htm", inside.extend(Dumpable).dump if dump
     good = inside.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name }.uniq{ |i| [i.height, i.width, i.top, i.left] }
     logger.info "good and unique: #{good.size}"   # only those that might be containers
-    File.write "dump.good.htm", good.extend(Dumpable).dump
+    File.write "#{dump}.good.htm", good.extend(Dumpable).dump if dump
 
     # large = good#.select{ |i| i[ww] > good.map(&ww).max / 4 }
     # logger.info "large enough: #{large.size}"
@@ -361,7 +361,7 @@ module PageRecognizer
       end
     end
     logger.info "not nested: #{rest.size}"
-    File.write "dump.rest.htm", rest.extend(Dumpable).dump
+    File.write "#{dump}.rest.htm", rest.extend(Dumpable).dump if dump
     begin
       prev = rest.size
       rest.select!.with_index do |a, i|
@@ -376,7 +376,7 @@ module PageRecognizer
       end
     end until prev == rest.size
     logger.info "gridable: #{rest.size}"
-    File.write "dump.griddable.htm", rest.extend(Dumpable).dump
+    File.write "#{dump}.griddable.htm", rest.extend(Dumpable).dump if dump
 
     require "pcbr"
     pcbr = PCBR.new
@@ -424,6 +424,7 @@ module PageRecognizer
     end
     lp.call []
     # TODO: if multiple with max score, take the max by area
+    pcbr.table.max_by(20, &:last).each_with_index{ |_, i| logger.debug "##{i} #{_}" }
     rest.values_at(*pcbr.table.max_by(&:last).first).extend Dumpable, Gridable
   end
 

@@ -1,3 +1,8 @@
+# https://datatracker.ietf.org/doc/html/rfc2557
+# https://en.wikipedia.org/wiki/Quoted-printable
+
+# install cwebp and gem "oga"
+
 require "strscan"
 mht = ARGF.read
 scanner = StringScanner.new mht

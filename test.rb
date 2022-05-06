@@ -14,8 +14,7 @@ describe PageRecognizer do
   after do
     @browser&.quit
   end
-  it "google rows" do
-    [
+  [
       ["google1.htm", [
         ["https://ru.wikipedia.org/wiki/Ruby#:~:te", "Ruby — Википедия"],
         ["https://www.ruby-lang.org/ru/", "Язык программирования Ruby"],
@@ -39,8 +38,8 @@ describe PageRecognizer do
         ["https://ru.hexlet.io/courses/ruby", "Введение в Ruby - Хекслет"],
         ["https://rubyrush.ru/articles/what-is-rub", "Что такое Ruby on Rails?"],
       ] ],
-    ].each do |filename, expectation|
-
+  ].each do |filename, expectation|
+    it "google rows #{filename}" do
     @browser.goto "file://#{File.expand_path filename}"
     results = @browser.at_css("body").rows([:AREA, :SIZE], try_min: 9) do |node|
       texts = node.texts
@@ -48,21 +47,19 @@ describe PageRecognizer do
       _, group = texts.group_by{ |_, style, | style["fontSize"].to_i }.to_a.max_by(&:first)
       next unless group
       next unless group.size == 1 && %i{ blue navy }.include?(group[0][2])
-      next if node.node.at_css "img"
       true
     end
-    assert_equal expectation, results.map{ |result| [
+    assert_equal expectation, results.reject{ |_| _.node.at_css "img" }.map{ |result| [
       result.node.at_css("a").property("href")[0,40],
       result.texts.max_by{ |_, style, | style["fontStyle"].to_i }[0].sub(/(.{40}) .+/, "\\1..."),
     ] }
-
     end
   end
-  it "youtube rows grid" do
-    [
+  [
       ["youtube.htm", %w{ Главная В\ тренде Подписки Библиотека История }, 8],
       ["youtube2.mht", %w{ Главная Навигатор Shorts Подписки Библиотека История }, 10],
-    ].each do |filename, expected_navigation, rows|
+  ].each do |filename, expected_navigation, rows|
+    it "youtube rows grid #{filename}" do
       @browser.goto "file://#{File.expand_path filename}"
       assert_equal expected_navigation, @browser.at_css("ytd-mini-guide-renderer").rows([:AREA, :SIZE]){ |_| !_.node.text.strip.empty? }.map{ |nav| nav.texts.first[0] }
       grid = @browser.at_css("#content").grid

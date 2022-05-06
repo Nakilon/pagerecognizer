@@ -17,7 +17,7 @@ Ferrum::Node.include PageRecognizer
 browser = Ferrum::Browser.new
 browser.goto "https://google.com/"
 ```
-Let's call the private method `#recognize` just to see what it would see and export the result like this:
+We've just added some methods to `Ferrum::Node`, let's call the private method `#recognize` to export what the A.I. would see to an HTML file like this:
 ```ruby
 File.write "dump.htm", browser.at_css("body").send(:recognize).dump
 ```
@@ -51,7 +51,7 @@ File.write "dump.htm", results.dump
 
 ![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/blackblue.png)
 
-Custom euristic not only helps the A.I. but also may make the recognition faster because it makes less nodes to process. It still picks wrong nodes though. Then let's select such that the biggest text in them is blue and happens only once. Also throw out the nodes with images because we are not interested in video results (note that we use `.node` since the `node` is a recognized object, a structure, and `.node` is the actual Ferrum object):
+Custom euristic not only helps the A.I. but also may make the recognition faster because it makes less nodes to process. It still picks wrong nodes though. Then let's select such that the biggest text in them is blue and happens only once:
 ```ruby
 ... do |node|
   texts = node.texts
@@ -59,16 +59,15 @@ Custom euristic not only helps the A.I. but also may make the recognition faster
   _, group = texts.group_by{ |text, style, | style["fontSize"].to_i }.to_a.max_by(&:first)
   next unless group
   next unless group.size == 1 && %i{ blue navy }.include?(group[0][2])
-  next if node.node.at_css "img"
   true
 end
 ```
 
 ![](http://gems.nakilon.pro.storage.yandexcloud.net/pagerecognizer/perfect.png)
 
-Perfect. Now we can parse them:
+Perfect. Now we can reject the nodes with images because we are not interested in video results (note that we use `node.node` since the `node` is a recognized object, a structure, and `node.node` is the actual Ferrum object), and then parse the results:
 ```ruby
-results.map do |result|
+results.reject{ |_| _.node.at_css "img" }.map do |result|
   [
     result.node.at_css("a").property("href")[0,40],
     result.texts.max_by{ |t, s, | s["fontStyle"].to_i }[0].sub(/(.{40}) .+/, "\\1..."),
