@@ -6,7 +6,7 @@
 The idea is to forget that DOM is a tree and view the page like a human would do. Then apply smart algorithms to recognize the main blocks that really form a UI.
 This is particularly useful in test automation because HTML/CSS internals are changing more frequently than design.
 
-### Example of splitting in rows (also check [`./google.example.rb`](google.example.rb) for some other details):
+### Example of splitting in rows (also check [`examples/google.rb`](./examples/google.rb) for some other details):
 
 I'll show how to use this tool on www.google.com as an exmple. The HTML page of it might already have some convenient ids or classes but let's pretend there are none. Currently the gem utilizes the Ferrum so you may already know some basic methods:
 ```ruby

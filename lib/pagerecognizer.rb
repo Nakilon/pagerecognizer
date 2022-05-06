@@ -116,7 +116,7 @@ module PageRecognizer
         end
       end
       prev = nodes.size
-      nodes = page.evaluate(<<~HEREDOC, self).map{ |node, rect, visible| str.new(node, visible, *JSON.load(rect)).tap{ |_| _.area = _.width * _.height } }
+      t = page.evaluate(<<~HEREDOC, self)
         ( function(node) {
           var x = scrollX, y = scrollY;
           var _tap = function(x, f){ f(); return x };
@@ -125,13 +125,15 @@ module PageRecognizer
             var rect = JSON.parse(JSON.stringify(node.getBoundingClientRect()));
             rect.top += scrollY;
             rect.left += scrollX;
-            return [ [
+            return [
               node, JSON.stringify([rect.top, rect.left, rect.width, rect.height]), ("visible" == getComputedStyle(node).visibility)
-            ] ].concat(Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 }).flatMap(f));
+            ].concat(Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 }).flatMap(f));
           };
           return _tap(f(node), function(){ scrollTo(x, y) });
         } )(arguments[0])
       HEREDOC
+      logger.debug [t.size / 3, prev]
+      nodes = t.each_slice(3).map{ |node, rect, visible| str.new(node, visible, *JSON.load(rect)).tap{ |_| _.area = _.width * _.height } }
       nodes.size == prev
     end
 
@@ -179,10 +181,9 @@ module PageRecognizer
       end
     end
 
-    all = unstale.call do recognize end.sort_by{ |_| [_[tt], _[ll]] }
-    File.write "dump.all.htm", all.extend(Dumpable).dump
+    nodes = unstale.call do recognize end.sort_by{ |_| [_[tt], _[ll]] }
+    File.write "dump.all.htm", nodes.extend(Dumpable).dump
 
-    nodes = all
 
     nodes = unstale.call do nodes.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name } end.uniq{ |_| [_[hh], _[ww], _[tt], _[ll]] }
     logger.info "good and unique: #{nodes.size}"   # only those that might be containers
@@ -193,18 +194,21 @@ module PageRecognizer
       b[tt] < a[tt] + a[hh]
     end
 
-    rest = nodes
 
-    rest = rest.select.with_index do |a, i|
-      rest.each_with_index.none? do |b, j|
+    rest = nodes.select.with_index do |a, i|
+      nodes.each_with_index.none? do |b, j|
         next if i == j
         a[tt] >= b[tt] && a[tt] + a[hh] <= b[tt] + b[hh] &&
         a[ll] >= b[ll] && a[ll] + a[ww] <= b[ll] + b[ww] &&
-        rest.all?{ |c| interfere[a, c] == interfere[b, c] }
+        nodes.all?{ |c| interfere[a, c] == interfere[b, c] }
       end
     end
     logger.info "not nested: #{rest.size}"
     File.write "dump.rest1.htm", rest.extend(Dumpable).dump
+
+    rest.select! &filter
+    logger.info "filtered: #{rest.size}"
+    File.write "dump.filtered.htm", rest.extend(Dumpable).dump
 
     # 8 = max_results - 1, 3 = (from row size diff euristic)
     if try_min
@@ -212,10 +216,6 @@ module PageRecognizer
       logger.info "small enough: #{rest.size}"
     end
     File.write "dump.rest2.htm", rest.extend(Dumpable).dump
-
-    rest.select! &filter
-    logger.info "filtered: #{rest.size}"
-    File.write "dump.rest3.htm", rest.extend(Dumpable).dump
 
     rest.sort_by!(&:area).reverse!
     File.write "dump.sorted.htm", rest.extend(Dumpable).dump
@@ -326,6 +326,7 @@ module PageRecognizer
 
     all = recognize
     logger.info "all nodes: #{all.size}"
+    File.write "dump.all.htm", all.extend(Dumpable).dump
 
     # adding the fields for faster upcoming computations
     struct = Struct.new *all.first.members, :midx, :midy
@@ -336,8 +337,10 @@ module PageRecognizer
     inside = all.reject{ |i| i.left < rect["left"] || i.left + i.width > rect["right"] || i.top < rect["top"] || i.top + i.height > rect["bottom"] }
     raise ErrorNotEnoughNodes.new "no inside nodes", all: all, inside: inside if inside.empty?
     logger.info "inside nodes: #{inside.size}"
-    good = inside.reject{ |i| %w{ button script svg path a img span }.include? i.node.tag_name }.uniq{ |i| [i.height, i.width, i.top, i.left] }
+    File.write "dump.inside.htm", inside.extend(Dumpable).dump
+    good = inside.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name }.uniq{ |i| [i.height, i.width, i.top, i.left] }
     logger.info "good and unique: #{good.size}"   # only those that might be containers
+    File.write "dump.good.htm", good.extend(Dumpable).dump
 
     # large = good#.select{ |i| i[ww] > good.map(&ww).max / 4 }
     # logger.info "large enough: #{large.size}"
@@ -358,6 +361,7 @@ module PageRecognizer
       end
     end
     logger.info "not nested: #{rest.size}"
+    File.write "dump.rest.htm", rest.extend(Dumpable).dump
     begin
       prev = rest.size
       rest.select!.with_index do |a, i|
@@ -372,6 +376,7 @@ module PageRecognizer
       end
     end until prev == rest.size
     logger.info "gridable: #{rest.size}"
+    File.write "dump.griddable.htm", rest.extend(Dumpable).dump
 
     require "pcbr"
     pcbr = PCBR.new
@@ -385,30 +390,32 @@ module PageRecognizer
       [c, a2].min.fdiv(a2) * [c, b2].min.fdiv(b2)
     end
     lp = lambda do |is|
-      [*rest.size.times.zip].each do |ij|
-        next if ij.min <= is.max unless is.empty?
-        sorted = (is + ij).sort
+      past.push is.map{ |i| 2**i }.reduce(:+)
+      rest.size.times do |ij|
+        next if ij <= is.last unless is.empty?
+        sorted = is + [ij]
         next if pcbr.set.include? sorted
-        next if ij.product(is).any?{ |i,j| interfere[rest[i], rest[j]] }
+        next if is.any?{ |j| interfere[rest[ij], rest[j]] }
         sol = rest.values_at *sorted
         xn = Module.nesting.first.piles sol.map{ |s| [s.left, s.width] }
         yn = Module.nesting.first.piles sol.map{ |s| [s.top, s.height] }
-        if sorted.size >= 4
-          next if xn.product(yn).any?{ |i,j| (i & j).size > 1 }
-        end
+        next if xn.product(yn).any?{ |i,j| (i & j).size > 1 } if sorted.size >= 4
         pcbr.store sorted, [
           *( sol.map(&:area).reduce(:+) if heuristics.include? :AREA ),
-          xn.size * yn.size,
           xn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.left, s1.width, s2.left, s2.width] }.reduce(:+) / sosol.size / (sosol.size - 1) * 2 }.reduce(:+) / xn.size,
           yn.map{ |g| sosol = sol.values_at *g; next 0 if sosol.size == 1; sosol.combination(2).map{ |s1, s2| inter[s1.top, s1.height, s2.top, s2.height] }.reduce(:+) / sosol.size / (sosol.size - 1) * 2 }.reduce(:+) / yn.size,
         ]
-        if prev && Time.now - time > 1 && (Time.now - prev > (prev - time) * 2 || Time.now - prev > 3)
+        if prev && Time.now - time > 3
+          logger.debug "check"
+          break logger.info "break 0" if Time.now - time > 30
+          break logger.info "break 1" if Time.now - prev > 10
           m = pcbr.table.reject{ |i| i.first.size < 3 }.map(&:last).max
-          break if 1 == pcbr.table.count{ |i| i.last == m } || Time.now - time > 3
+          break logger.debug "break 2" if Time.now - prev > (prev - time) * 2 && 1 == pcbr.table.count{ |i| i.last == m }
         end
-        break unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)  # why reject?!
-        past.push is.map{ |i| 2**i }.reduce(:+)
-        if t.last > max && (!prev_max || t.first != prev_max)
+
+        break logger.info "break 3" unless t = pcbr.table.reject{ |is,| past.include? is.map{ |i| 2**i }.reduce(:+) }.max_by(&:last)
+        logger.debug [t.last, max, t.first == prev_max, t.first.map{ |i| 2**i }.reduce(:+)]
+        if t.last > max && t.first != prev_max
           prev, max, prev_max = Time.now, t.last, t.first
           logger.debug [pcbr.table.size, max, t.first]
         end

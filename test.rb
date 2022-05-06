@@ -2,7 +2,7 @@ require "minitest/autorun"
 
 require "ferrum"
 require_relative "lib/pagerecognizer"
-# PageRecognizer.logger.level = :DEBUG
+PageRecognizer.logger.level = :INFO
 
 describe PageRecognizer do
   before do
@@ -58,14 +58,13 @@ describe PageRecognizer do
 
     end
   end
-  it "youtube cols grid" do
-    @browser.goto "about:blank"
-    @browser.execute "document.write(#{File.read("youtube.htm").inspect})"
-    assert_equal %w{ Главная В\ тренде Подписки Библиотека История }, @browser.at_css("ytd-mini-guide-renderer").rows([:AREA, :SIZE]).map(&:node).map(&:text).map(&:strip)
-    results = @browser.at_css("#content").grid
-    assert_equal 24, results.size
-    assert results.flat_map{ |n| n.to_h.values_at :width, :height }.all?{ |_| (_-275).abs < 25 }
-    assert_equal [3]*8, results.rows.map(&:size)
-    assert_equal [8]*3, results.cols.map(&:size)
+  it "youtube rows grid" do
+    @browser.goto "file://#{File.expand_path "youtube.mht"}"
+    assert_equal %w{ Главная Навигатор Shorts Подписки Библиотека История }, @browser.at_css("ytd-mini-guide-renderer").rows([:AREA, :SIZE]){ |_| !_.node.text.strip.empty? }.map{ |nav| nav.texts.first[0] }
+    grid = @browser.at_css("#content").grid
+    assert_equal 30, grid.size
+    assert_equal [3]*10, grid.rows.map(&:size)
+    assert_equal [10]*3, grid.cols.map(&:size)
+    grid.each{ |n| n.to_h.values_at(:width, :height).each{ |_| assert_in_delta 250, _, 50 } }
   end
 end

@@ -1,5 +1,5 @@
 require "ferrum"                              # currently only Ferrum is supported but it should be trivial to add Selenium
-require_relative "lib/pagerecognizer"
+require_relative "../lib/pagerecognizer"
 # PageRecognizer.logger.level = Logger::DEBUG # loglevel is FATAL by default
 Ferrum::Node.include PageRecognizer           # here we add Ferrum nodes the magic methods
 
