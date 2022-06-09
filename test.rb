@@ -14,6 +14,7 @@ describe PageRecognizer do
   after do
     @browser&.quit
   end
+
   [
       ["google1.htm", [
         ["https://ru.wikipedia.org/wiki/Ruby#:~:te", "Ruby — Википедия"],
@@ -67,6 +68,32 @@ describe PageRecognizer do
       assert_equal [3]*rows, grid.rows.map(&:size)
       assert_equal [rows]*3, grid.cols.map(&:size)
       grid.each{ |n| n.to_h.values_at(:width, :height).each{ |_| assert_in_delta 250, _, 50 } }
+    end
+  end
+  [
+    ["yandex.mht", [
+      ["https://www.ruby-lang.org/ru/", "Язык программирования Ruby"],
+      ["https://www.ruby-lang.org/", "Ruby Programming Language"],
+      ["https://www.ruby-lang.org/en/", "Ruby Programming Language"],
+      ["https://ru.wikipedia.org/wiki/Ruby", "Ruby — Википедия"],
+      ["https://en.wikipedia.org/wiki/Ruby_(prog", "Ruby (programming language) - Wikipedia"],
+      ["https://developer.oracle.com/ruby/what-i", "What is Ruby? | Oracle Developer"],
+      ["https://github.com/ruby/ruby", "GitHub - ruby/ruby: The Ruby Programming Language [mirror]"],
+      ["https://www.opennet.ru/docs/RUS/ruby_gui", "Ruby - Руководство пользователя"],
+      ["https://www.youtube.com/playlist?list=PL", "Изучение Ruby для начинающих - YouTube"],
+      ["https://medium.com/nuances-of-programmin", "Основы программирования на Ruby. Что такое Ruby?"],
+    ] ],
+  ].each do |filename, expectation|
+    it "yandex rows #{filename}" do
+      @browser.goto "file://#{File.expand_path filename}"
+      nodes = @browser.at_css("body").rows([:AREA, :SIZE], try_min: 9) do |node|
+        node.node.at_css("a") &&
+        node.node.at_css("a").property("href")[/(?<=\/)[^\/]+/] != "yabs.yandex.ru"
+      end
+      assert_equal expectation, nodes.group_by(&:left).values.max_by(&:size).map{ |result| [
+        result.node.at_css("a").property("href")[0,40],
+        result.node.at_css("a").text,
+      ] }
     end
   end
 end

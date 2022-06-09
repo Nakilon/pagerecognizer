@@ -8,8 +8,7 @@ mht = ARGF.read
 scanner = StringScanner.new mht
 fail unless scanner.scan(/\AFrom: <Saved by Blink>\r
 Snapshot-Content-Location: \S+\r
-Subject: \S+\r
-Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d -0000\r
+Subject:(?: \S+\r\n)+Date: [A-Z][a-z][a-z], \d\d? [A-Z][a-z][a-z] 20\d\d \d\d:\d\d:\d\d -0000\r
 MIME-Version: 1\.0\r
 Content-Type: multipart\/related;\r
 \ttype="text\/html";\r
@@ -106,10 +105,17 @@ Content-Location: \S+\r\n\r\n/
     File.binwrite "temp.#{$1}", Base64.decode64($')
     require "open3"
     string, status = Open3.capture2e "cwebp -quiet -sharp_yuv -m 6 -q 0 -alpha_q 0 temp.#{$1} -o -"
-    fail unless status.exitstatus.zero?
-    string = Base64.encode64 string
-    puts "cwebp #{string.size}"
-    reps.push [prev, scanner.pos-delimeter.size-4, header, string]
+    if status.exitstatus.zero?
+      string = Base64.encode64 string
+      puts "cwebp #{string.size}"
+      reps.push [prev, scanner.pos-delimeter.size-4, header, string]
+    else
+      puts string
+    end
+  when /\A\r\nContent-Type: image\/svg\+xml\r
+Content-Transfer-Encoding: quoted-printable\r
+Content-Location: \S+\r\n\r\n/
+    puts "svg #{$'.size}"
   else
     puts doc[0..300]
     fail
@@ -126,3 +132,4 @@ reps.reverse_each do |from, to, header, str, qp|
   mht[from...to] = str
 end
 p File.write "temp.mht", mht
+puts "OK"

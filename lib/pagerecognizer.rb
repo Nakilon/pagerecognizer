@@ -73,21 +73,15 @@ module PageRecognizer
                 text = iterator.iterateNext();
               ) {
                 range.selectNode(text);
-                result.push(JSON.stringify( [
-                  text.wholeText,
-                  range.getBoundingClientRect(),
-                  text.parentNode.getBoundingClientRect(),
-                  getComputedStyle(text.parentNode),
-                ] ));
+                let rect1 = range.getBoundingClientRect();
+                let rect2 = text.parentNode.getBoundingClientRect();
+                if (rect1.width >= 2 && rect1.height >= 2 && rect2.width >= 2 && rect2.height >= 2)
+                  result.push(JSON.stringify( [text.wholeText, rect1, rect2, getComputedStyle(text.parentNode)] ));
+                  // google SERP has 1x1 nodes with text _<>
               }
               return result;
             })(arguments[0])
           HEREDOC
-
-            # google SERP has 1x1 nodes with text _<>
-            next if rect1["width"] < 2 || rect1["height"] < 2
-            next if rect2["width"] < 2 || rect2["height"] < 2
-
             color = style["color"]
             fail color unless /\Argba?\((?<red>\d+), (?<green>\d+), (?<blue>\d+)(, 0(\.\d+)?)?\)\z/ =~ color
             closest_color = {   # https://en.wikipedia.org/wiki/Web_colors#Basic_colors
@@ -126,25 +120,26 @@ module PageRecognizer
             rect.top += scrollY;
             rect.left += scrollX;
             return [
-              node, JSON.stringify([rect.top, rect.left, rect.width, rect.height]), ("visible" == getComputedStyle(node).visibility)
+              node, JSON.stringify([("visible" == getComputedStyle(node).visibility), rect.top, rect.left, rect.width, rect.height])
             ].concat(Array.from(node.childNodes).filter(function(node) { return node.nodeType == 1 }).flatMap(f));
           };
           return _tap(f(node), function(){ scrollTo(x, y) });
         } )(arguments[0])
       HEREDOC
-      logger.debug [t.size / 3, prev]
-      nodes = t.each_slice(3).map{ |node, rect, visible| str.new(node, visible, *JSON.load(rect)).tap{ |_| _.area = _.width * _.height } }
+p Time.now
+      logger.debug [t.size / 2, prev]
+      nodes = t.each_slice(2).map{ |node, rect_visible| str.new(node, *JSON.load(rect_visible)).tap{ |_| _.area = _.width * _.height } }
       nodes.size == prev
     end
 
     if defined? Selenium::WebDriver::Wait
       Selenium::WebDriver::Wait.new(
-        message: "number of DOM elements didn't stop to change"
+        message: "either number of DOM elements didn't stop to change or recognition took too long"
       ).until &try
     else
       t = Time.now
       until try.call
-        fail "number of DOM elements didn't stop to change" if Time.now > t + 10
+        fail "either number of DOM elements didn't stop to change or recognition took too long" if Time.now > t + 10
       end
     end
     logger.info "#{nodes.size} DOM nodes found"
@@ -185,7 +180,7 @@ module PageRecognizer
     File.write "#{dump}.all.htm", nodes.extend(Dumpable).dump if dump
 
 
-    nodes = unstale.call do nodes.reject{ |i| %w{ button script svg path a img }.include? i.node.tag_name } end.uniq{ |_| [_[hh], _[ww], _[tt], _[ll]] }
+    nodes = unstale.call do nodes.reject{ |_| %w{ button script svg path a img }.include? _.node.tag_name } end.uniq{ |_| [_[hh], _[ww], _[tt], _[ll]] }
     logger.info "good and unique: #{nodes.size}"   # only those that might be containers
     File.write "#{dump}.nodes.htm", nodes.extend(Dumpable).dump if dump
 
